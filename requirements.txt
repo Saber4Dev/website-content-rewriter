@@ -1,0 +1,6 @@
+streamlit>=1.28.0
+beautifulsoup4>=4.12.2
+google-generativeai>=0.8.6
+openai>=1.0.0
+requests>=2.31.0
+protobuf>=5.29.5
