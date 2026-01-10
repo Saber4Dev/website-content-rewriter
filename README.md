@@ -1,4 +1,4 @@
-# ✨ SEO Content Rewriter
+# ✨ Website Content Rewriter
 
 A powerful web application for automatically rewriting HTML content using AI and replacing placeholder images with real images from multiple sources.
 
