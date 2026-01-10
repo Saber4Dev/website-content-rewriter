@@ -1,6 +1,6 @@
 # Project Structure
 
-This document explains the organization of the SEO Content Rewriter project.
+This document explains the organization of the Website Content Rewriter project.
 
 ## Directory Structure
 

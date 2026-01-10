@@ -1,1 +1,1 @@
-# SEO Content Rewriter - Source Package
+# Website Content Rewriter - Source Package

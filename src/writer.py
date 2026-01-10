@@ -1179,7 +1179,7 @@ def iter_html_files(input_dir: Path, recursive: bool, target_files: Optional[Lis
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SEO Content Rewriter - Optimizes text content and image alt attributes in HTML files",
+        description="Website Content Rewriter - Optimizes text content and image alt attributes in HTML files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1302,7 +1302,7 @@ Examples:
     backup_mode = "WITH BACKUP" if (not args.no_backup and in_place and not args.dry_run) else "NO BACKUP"
     
     logging.info("=" * 60)
-    logging.info(f"SEO Content Rewriter - Processing Mode: {mode} ({backup_mode})")
+    logging.info(f"Website Content Rewriter - Processing Mode: {mode} ({backup_mode})")
     logging.info(f"Input directory: {input_dir}")
     if args.file:
         logging.info(f"Target files: {', '.join(args.file)}")

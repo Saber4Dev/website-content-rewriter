@@ -25,7 +25,7 @@ from ai_providers import create_ai_provider, AIProvider
 
 # Page config
 st.set_page_config(
-    page_title="SEO Content Rewriter",
+    page_title="Website Content Rewriter",
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -395,7 +395,7 @@ def process_file_web(file_path: Path, config: dict):
             area=config.get('area', 'Nouvelle Ville Ibn Batouta'),
             phone=config.get('phone', '07 79 66 67 20'),
             primary_kw=config.get('primary_keyword', 'agence immobilière à Tanger'),
-            secondary_kws=config.get('secondary_keywords', []),
+            secondary_kws=config.get('secondary_keywords') or [],
             max_retries=int(config.get('max_retries', 3)),
             request_delay=float(config.get('request_delay', 1.5)),
             model_name=config.get('model_name', None),
@@ -475,7 +475,7 @@ def process_file_web(file_path: Path, config: dict):
 # STREAMLIT UI
 # ==========================================
 def main():
-    st.title("✨ SEO Content Rewriter")
+    st.title("✨ Website Content Rewriter")
     st.markdown("AI-Powered Content Optimization & Image Replacement")
     
     # Sidebar for configuration

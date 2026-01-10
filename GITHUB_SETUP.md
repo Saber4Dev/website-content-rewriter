@@ -50,7 +50,7 @@ git add .
 
 3. **Commit**:
 ```bash
-git commit -m "Initial commit: SEO Content Rewriter Streamlit app"
+git commit -m "Initial commit: Website Content Rewriter Streamlit app"
 ```
 
 4. **Create repository on GitHub** and push:

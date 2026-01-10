@@ -70,13 +70,21 @@ class GeminiProvider(AIProvider):
         if not GEMINI_AVAILABLE:
             raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai")
         
+        # Ensure secondary_kws is always a list
+        if secondary_kws is None:
+            secondary_kws = []
+        elif not isinstance(secondary_kws, list):
+            secondary_kws = [str(secondary_kws)] if secondary_kws else []
+        
+        # Ensure other string parameters are not None
+        self.brand = brand or ""
+        self.city = city or ""
+        self.area = area or ""
+        self.phone = phone or ""
+        self.primary_kw = primary_kw or ""
+        
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(model_name)
-        self.brand = brand
-        self.city = city
-        self.area = area
-        self.phone = phone
-        self.primary_kw = primary_kw
         self.secondary_kws = secondary_kws
         self.max_retries = max_retries
         self.request_delay = request_delay
@@ -184,7 +192,11 @@ class GeminiProvider(AIProvider):
                 "node_type": node_type
             })
         
-        has_lorem = any("lorem" in t.lower() or "ipsum" in t.lower() for _, t in id_text_pairs)
+        has_lorem = any(
+            t and ("lorem" in t.lower() or "ipsum" in t.lower()) 
+            for _, t in id_text_pairs 
+            if t is not None
+        )
         context_note = f"\nCONTEXTE SECTION: {section_context}" if section_context else ""
         lang_name = self._get_language_name(language)
         tone_instructions = self._get_tone_instructions(tone, language)
@@ -207,7 +219,7 @@ CONTEXTE MARQUE:
 
 MOTS-CLÉS:
 - Mot-clé principal: {self.primary_kw}
-- Mots-clés secondaires: {", ".join(self.secondary_kws)}
+- Mots-clés secondaires: {", ".join(self.secondary_kws) if self.secondary_kws else "Aucun"}
 
 STYLE D'ÉCRITURE (CRITIQUE):
 - {tone_instructions}
@@ -245,7 +257,7 @@ BRAND CONTEXT:
 
 KEYWORDS:
 - Primary keyword: {self.primary_kw}
-- Secondary keywords: {", ".join(self.secondary_kws)}
+- Secondary keywords: {", ".join(self.secondary_kws) if self.secondary_kws else "None"}
 
 WRITING STYLE (CRITICAL):
 - {tone_instructions}
@@ -423,12 +435,20 @@ class OpenAIProvider(AIProvider):
         if not OPENAI_AVAILABLE:
             raise ImportError("openai package not installed. Install with: pip install openai")
         
+        # Ensure secondary_kws is always a list
+        if secondary_kws is None:
+            secondary_kws = []
+        elif not isinstance(secondary_kws, list):
+            secondary_kws = [str(secondary_kws)] if secondary_kws else []
+        
+        # Ensure other string parameters are not None
+        self.brand = brand or ""
+        self.city = city or ""
+        self.area = area or ""
+        self.phone = phone or ""
+        self.primary_kw = primary_kw or ""
+        
         self.client = openai.OpenAI(api_key=api_key)
-        self.brand = brand
-        self.city = city
-        self.area = area
-        self.phone = phone
-        self.primary_kw = primary_kw
         self.secondary_kws = secondary_kws
         self.max_retries = max_retries
         self.request_delay = request_delay
@@ -538,7 +558,11 @@ class OpenAIProvider(AIProvider):
                 "node_type": node_type
             })
         
-        has_lorem = any("lorem" in t.lower() or "ipsum" in t.lower() for _, t in id_text_pairs)
+        has_lorem = any(
+            t and ("lorem" in t.lower() or "ipsum" in t.lower()) 
+            for _, t in id_text_pairs 
+            if t is not None
+        )
         context_note = f"\nSection Context: {section_context}" if section_context else ""
         lang_name = self._get_language_name(language)
         tone_instructions = self._get_tone_instructions(tone, language)
@@ -558,7 +582,7 @@ Brand Context:
 
 Keywords:
 - Primary: {self.primary_kw}
-- Secondary: {", ".join(self.secondary_kws)}
+- Secondary: {", ".join(self.secondary_kws) if self.secondary_kws else "None"}
 
 CRITICAL RULES:
 1) Keep same language ({lang_name} only)

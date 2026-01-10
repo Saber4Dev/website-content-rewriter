@@ -1,6 +1,6 @@
 # Examples
 
-This folder contains example HTML files that you can use to test the SEO Content Rewriter.
+This folder contains example HTML files that you can use to test the Website Content Rewriter.
 
 ## Sample Files
 
