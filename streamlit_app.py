@@ -40,6 +40,14 @@ if 'image_assignments' not in st.session_state:
     st.session_state.image_assignments = []
 if 'logs' not in st.session_state:
     st.session_state.logs = []
+if 'progress' not in st.session_state:
+    st.session_state.progress = 0.0
+if 'progress_text' not in st.session_state:
+    st.session_state.progress_text = ""
+if 'current_file' not in st.session_state:
+    st.session_state.current_file = ""
+if 'total_files' not in st.session_state:
+    st.session_state.total_files = 0
 
 # Create uploads directory
 UPLOAD_FOLDER = Path('uploads')
@@ -179,6 +187,55 @@ def add_log(message: str, level: str = 'info'):
     # Keep only last 1000 logs
     if len(st.session_state.logs) > 1000:
         st.session_state.logs = st.session_state.logs[-1000:]
+
+
+class StreamlitLogHandler(logging.Handler):
+    """Custom logging handler that sends logs to Streamlit."""
+    
+    def emit(self, record):
+        """Emit a log record to Streamlit."""
+        try:
+            # Check if Streamlit session state is available
+            if not hasattr(st, 'session_state') or 'logs' not in st.session_state:
+                # Fallback to console if Streamlit not ready
+                print(f"[{record.levelname}] {self.format(record)}")
+                return
+            
+            # Map logging levels to our log levels
+            level_map = {
+                logging.DEBUG: 'info',
+                logging.INFO: 'info',
+                logging.WARNING: 'warning',
+                logging.ERROR: 'error',
+                logging.CRITICAL: 'error'
+            }
+            level = level_map.get(record.levelno, 'info')
+            message = self.format(record)
+            add_log(message, level)
+        except (AttributeError, RuntimeError):
+            # Streamlit not ready or session state not available - fallback to console
+            print(f"[{record.levelname}] {self.format(record)}")
+        except Exception:
+            # Ignore other errors in logging handler to avoid infinite loops
+            pass
+
+
+# Setup logging to capture all backend logs
+def setup_logging():
+    """Setup logging to capture all backend logs in Streamlit."""
+    # Remove existing handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Add Streamlit handler
+    streamlit_handler = StreamlitLogHandler()
+    streamlit_handler.setFormatter(logging.Formatter('%(message)s'))
+    root_logger.addHandler(streamlit_handler)
+    root_logger.setLevel(logging.INFO)
+
+# Setup logging when module is imported
+setup_logging()
 
 
 # ==========================================
@@ -367,7 +424,7 @@ def process_section_web(rewriter: AIProvider, section_name, section_element, fil
     return result
 
 
-def process_file_web(file_path: Path, config: dict):
+def process_file_web(file_path: Path, config: dict, file_index: int = 0, total_files: int = 1):
     """Process a single HTML file."""
     try:
         html = file_path.read_text(encoding="utf-8", errors="ignore")
@@ -376,6 +433,12 @@ def process_file_web(file_path: Path, config: dict):
         return False
     
     soup = BeautifulSoup(html, "html.parser")
+    
+    # Update progress
+    file_progress = (file_index / total_files) * 100 if total_files > 0 else 0
+    st.session_state.progress = file_progress
+    st.session_state.current_file = file_path.name
+    st.session_state.progress_text = f"Processing file {file_index + 1}/{total_files}: {file_path.name}"
     
     # Get AI provider settings
     ai_provider = config.get('ai_provider', 'gemini').lower()
@@ -425,7 +488,11 @@ def process_file_web(file_path: Path, config: dict):
     insert_images = config.get('insert_images', False)
     
     for section_idx, (section_name, section_element) in enumerate(sections, start=1):
-        add_log(f"[{section_idx}/{len(sections)}] Processing section...", 'info')
+        # Update progress for sections
+        section_progress = file_progress + ((section_idx / len(sections)) * (100 / total_files) if total_files > 0 else 0)
+        st.session_state.progress = min(section_progress, 100.0)
+        st.session_state.progress_text = f"File {file_index + 1}/{total_files}: {file_path.name} - Section {section_idx}/{len(sections)}: {section_name}"
+        add_log(f"[{section_idx}/{len(sections)}] Processing section: {section_name}", 'info')
         
         section_result = process_section_web(rewriter, section_name, section_element, file_path.name, image_sources, language, tone, insert_images)
         
@@ -478,17 +545,22 @@ def main():
     st.title("✨ Website Content Rewriter")
     st.markdown("AI-Powered Content Optimization & Image Replacement")
     
+    # Main container - File Upload and Insert Images option at the top
+    st.subheader("📁 File Selection")
+    uploaded_files = st.file_uploader(
+        "Upload HTML files",
+        type=['html'],
+        accept_multiple_files=True
+    )
+    
+    # Insert Images option at the top
+    insert_images = st.checkbox("🖼️ Insert Images into HTML", value=True, help="Add <img> tags where images are missing")
+    
+    st.divider()
+    
     # Sidebar for configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
-        
-        # File Upload
-        st.subheader("📁 File Selection")
-        uploaded_files = st.file_uploader(
-            "Upload HTML files",
-            type=['html'],
-            accept_multiple_files=True
-        )
         
         # AI Provider Configuration
         st.subheader("🤖 AI Provider")
@@ -499,7 +571,8 @@ def main():
         else:
             api_key = st.text_input("OpenAI API Key", type="password", help="Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)")
         
-        model_name = st.text_input("Model Name (optional)", placeholder="Auto")
+        model_name_input = st.text_input("Model Name (optional)", placeholder="Auto", value="")
+        model_name = model_name_input.strip() if model_name_input else None
         temperature = st.slider("Temperature", 0.0, 2.0, 0.1, 0.1)
         max_tokens = st.number_input("Max Tokens", 512, 32768, 8192 if ai_provider == "gemini" else 4096, 512)
         max_retries = st.number_input("Max Retries", 1, 10, 3)
@@ -535,8 +608,6 @@ def main():
         if st.checkbox("Picsum"):
             image_sources.append("picsum")
         
-        insert_images = st.checkbox("Insert Images into HTML", value=True, help="Add <img> tags where images are missing")
-        
         # Options
         st.subheader("🔧 Options")
         create_backup = st.checkbox("Create Backup", value=True)
@@ -565,6 +636,9 @@ def main():
                 st.session_state.logs = []
                 st.session_state.processed_files = []
                 st.session_state.image_assignments = []
+                st.session_state.progress = 0.0
+                st.session_state.progress_text = "Initializing..."
+                st.session_state.total_files = len(uploaded_files)
                 
                 # Prepare config
                 config = {
@@ -591,23 +665,27 @@ def main():
                 }
                 
                 # Save uploaded files and process
-                for uploaded_file in uploaded_files:
+                for file_idx, uploaded_file in enumerate(uploaded_files):
                     file_path = UPLOAD_FOLDER / uploaded_file.name
                     with open(file_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     
                     add_log(f"Processing: {uploaded_file.name}", 'info')
-                    process_file_web(file_path, config)
+                    process_file_web(file_path, config, file_idx, len(uploaded_files))
                 
+                st.session_state.progress = 100.0
+                st.session_state.progress_text = "Processing complete!"
                 st.session_state.processing = False
                 st.success("✅ Processing complete!")
                 st.rerun()
         
-        # Processing status
+        # Processing status with progress bar
         if st.session_state.processing:
             st.warning("⏳ Processing in progress...")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            progress_value = st.session_state.progress / 100.0
+            st.progress(progress_value)
+            if st.session_state.progress_text:
+                st.caption(f"📊 {st.session_state.progress_text}")
     
     with col2:
         st.subheader("📊 Status")
@@ -616,28 +694,45 @@ def main():
         else:
             st.info("No files processed yet")
     
-    # Logs section
-    st.subheader("📋 Processing Logs")
-    log_container = st.container()
-    with log_container:
-        if st.session_state.logs:
-            # Show last 50 logs
-            recent_logs = st.session_state.logs[-50:]
-            for log in recent_logs:
-                level = log['level']
-                message = log['message']
-                timestamp = log['timestamp']
+    # Logs section with expandable container
+    with st.expander("📋 Processing Logs", expanded=True):
+        log_container = st.container()
+        with log_container:
+            if st.session_state.logs:
+                # Show last 100 logs in a scrollable container
+                recent_logs = st.session_state.logs[-100:]
                 
-                if level == 'error':
-                    st.error(f"[{timestamp}] {message}")
-                elif level == 'warning':
-                    st.warning(f"[{timestamp}] {message}")
-                elif level == 'success':
-                    st.success(f"[{timestamp}] {message}")
-                else:
-                    st.info(f"[{timestamp}] {message}")
-        else:
-            st.info("Ready to process files...")
+                # Create a scrollable text area for logs
+                log_text = ""
+                for log in recent_logs:
+                    level = log['level']
+                    message = log['message']
+                    timestamp = log['timestamp']
+                    
+                    # Use emoji for different log levels
+                    emoji_map = {
+                        'error': '❌',
+                        'warning': '⚠️',
+                        'success': '✅',
+                        'info': 'ℹ️'
+                    }
+                    emoji = emoji_map.get(level, 'ℹ️')
+                    log_text += f"[{timestamp}] {emoji} {message}\n"
+                
+                # Display logs in a code block for better formatting
+                st.text_area(
+                    "Logs",
+                    value=log_text,
+                    height=300,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key="log_display"
+                )
+                
+                # Show log count
+                st.caption(f"Showing {len(recent_logs)} of {len(st.session_state.logs)} log entries")
+            else:
+                st.info("Ready to process files...")
     
     # Image Gallery
     if st.session_state.image_assignments:

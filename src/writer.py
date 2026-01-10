@@ -12,7 +12,13 @@ from typing import List, Tuple, Optional
 from datetime import datetime
 
 from bs4 import BeautifulSoup, NavigableString, Comment
-import google.generativeai as genai
+# Use old package (google-generativeai) - most reliable
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+    genai = None
 
 
 # ==========================================
@@ -112,6 +118,10 @@ class GeminiSEORewriter:
         max_retries: int = 3,
         request_delay: float = 1.5
     ):
+        if not GEMINI_AVAILABLE or genai is None:
+            raise ImportError("google-genai package not installed. Install with: pip install google-genai")
+        
+        # The new google-genai package still supports the old API structure
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel(MODEL_NAME)
         self.brand = brand
@@ -126,6 +136,7 @@ class GeminiSEORewriter:
     def _call_gemini(self, prompt: str) -> str:
         for attempt in range(1, self.max_retries + 1):
             try:
+                # Works with both old and new google-genai package
                 resp = self.model.generate_content(prompt, generation_config=GENERATION_CONFIG)
                 text = (resp.text or "").strip()
                 if text:

@@ -9,11 +9,13 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional
 import json
 
+# Use google-generativeai (still supported until June 2026)
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
+    genai = None
 
 try:
     import openai
@@ -67,7 +69,7 @@ class GeminiProvider(AIProvider):
         temperature: float = 0.1,
         max_tokens: int = 8192
     ):
-        if not GEMINI_AVAILABLE:
+        if not GEMINI_AVAILABLE or genai is None:
             raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai")
         
         # Ensure secondary_kws is always a list
@@ -83,8 +85,26 @@ class GeminiProvider(AIProvider):
         self.phone = phone or ""
         self.primary_kw = primary_kw or ""
         
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        # Ensure api_key is not None or empty
+        if api_key is None:
+            raise ValueError("API key is required for Gemini provider (received None)")
+        if not isinstance(api_key, str):
+            api_key = str(api_key)
+        if not api_key.strip():
+            raise ValueError("API key is required for Gemini provider (received empty string)")
+        
+        # Ensure model_name is not None, use default if empty
+        if model_name is None or (isinstance(model_name, str) and not model_name.strip()):
+            model_name = "gemini-2.0-flash"
+        elif not isinstance(model_name, str):
+            model_name = str(model_name)
+        
+        # Initialize with google-generativeai (reliable and still supported)
+        try:
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel(model_name)
+        except Exception as e:
+            raise ValueError(f"Failed to initialize Gemini: {str(e)}. Check your API key and model name.")
         self.secondary_kws = secondary_kws
         self.max_retries = max_retries
         self.request_delay = request_delay
@@ -102,12 +122,16 @@ class GeminiProvider(AIProvider):
                 resp = self.model.generate_content(prompt, generation_config=self.generation_config)
                 text = (resp.text or "").strip()
                 if text:
+                    logging.debug(f"Gemini response received (length: {len(text)})")
                     return text
+                else:
+                    logging.warning(f"Gemini returned empty response (attempt {attempt}/{self.max_retries})")
             except Exception as e:
-                logging.warning(f"Gemini error (attempt {attempt}/{self.max_retries}): {e}")
+                error_msg = str(e)
+                logging.warning(f"Gemini error (attempt {attempt}/{self.max_retries}): {error_msg}")
                 if attempt < self.max_retries:
                     time.sleep(2)
-        raise RuntimeError("Gemini call failed after retries")
+        raise RuntimeError(f"Gemini call failed after {self.max_retries} retries")
     
     def _get_language_name(self, language: str) -> str:
         """Get full language name from code."""
@@ -280,9 +304,32 @@ INPUT (JSON):
         
         result = self._call_gemini(prompt)
         
-        # Parse and process results (same logic as before)
+        # Check if result is empty
+        if not result or not result.strip():
+            logging.error("Gemini returned empty response")
+            raise ValueError("Gemini API returned empty response. The model may have been blocked or the prompt was too long.")
+        
+        # Try to extract JSON from markdown code blocks if present
+        result_clean = result.strip()
+        if result_clean.startswith("```json"):
+            result_clean = result_clean[7:]
+        elif result_clean.startswith("```"):
+            result_clean = result_clean[3:]
+        if result_clean.endswith("```"):
+            result_clean = result_clean[:-3]
+        result_clean = result_clean.strip()
+        
+        # Find JSON array in the response
+        json_start = result_clean.find("[")
+        json_end = result_clean.rfind("]")
+        if json_start != -1 and json_end != -1 and json_end > json_start:
+            result_clean = result_clean[json_start:json_end+1]
+        
+        # Parse and process results
         try:
-            parsed = json.loads(result)
+            if not result_clean:
+                raise ValueError("No JSON found in response")
+            parsed = json.loads(result_clean)
             out = []
             for obj in parsed:
                 new_text = str(obj["text"])
@@ -341,10 +388,19 @@ INPUT (JSON):
                 
                 out.append((obj_id, new_text))
             return out
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse Gemini response as JSON: {e}")
+            logging.error(f"Response preview (first 500 chars): {result[:500]}")
+            logging.error(f"Cleaned response preview: {result_clean[:500] if result_clean else 'EMPTY'}")
+            # Try to return original texts as fallback
+            logging.warning("Returning original texts as fallback due to JSON parsing error")
+            return [(i, t) for i, t in id_text_pairs]
         except Exception as e:
             logging.error(f"Failed to parse Gemini response: {e}")
-            logging.debug(f"Response was: {result[:500]}")
-            raise
+            logging.error(f"Response preview (first 500 chars): {result[:500]}")
+            # Try to return original texts as fallback
+            logging.warning("Returning original texts as fallback due to parsing error")
+            return [(i, t) for i, t in id_text_pairs]
     
     def optimize_image_alts_batch(
         self,
@@ -402,16 +458,41 @@ IMAGES:
         
         result = self._call_gemini(prompt)
         
+        # Check if result is empty
+        if not result or not result.strip():
+            logging.error("Gemini returned empty response for image alts")
+            return [{"id": img.get("id", 0), "alt": img.get("existing_alt", ""), "image_query": None} for img in images]
+        
+        # Try to extract JSON from markdown code blocks if present
+        result_clean = result.strip()
+        if result_clean.startswith("```json"):
+            result_clean = result_clean[7:]
+        elif result_clean.startswith("```"):
+            result_clean = result_clean[3:]
+        if result_clean.endswith("```"):
+            result_clean = result_clean[:-3]
+        result_clean = result_clean.strip()
+        
+        # Find JSON array in the response
+        json_start = result_clean.find("[")
+        json_end = result_clean.rfind("]")
+        if json_start != -1 and json_end != -1 and json_end > json_start:
+            result_clean = result_clean[json_start:json_end+1]
+        
         try:
-            parsed = json.loads(result)
+            if not result_clean:
+                raise ValueError("No JSON found in response")
+            parsed = json.loads(result_clean)
             return parsed
-        except Exception:
-            start = result.find("[")
-            end = result.rfind("]")
-            if start != -1 and end != -1:
-                parsed = json.loads(result[start:end+1])
-                return parsed
-            raise
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse Gemini alt response as JSON: {e}")
+            logging.error(f"Response preview: {result[:500]}")
+            # Return fallback with existing alts
+            return [{"id": img.get("id", 0), "alt": img.get("existing_alt", ""), "image_query": None} for img in images]
+        except Exception as e:
+            logging.error(f"Failed to parse Gemini alt response: {e}")
+            # Return fallback with existing alts
+            return [{"id": img.get("id", 0), "alt": img.get("existing_alt", ""), "image_query": None} for img in images]
 
 
 class OpenAIProvider(AIProvider):
@@ -448,11 +529,28 @@ class OpenAIProvider(AIProvider):
         self.phone = phone or ""
         self.primary_kw = primary_kw or ""
         
-        self.client = openai.OpenAI(api_key=api_key)
+        # Ensure api_key is not None or empty
+        if api_key is None:
+            raise ValueError("API key is required for OpenAI provider (received None)")
+        if not isinstance(api_key, str):
+            api_key = str(api_key)
+        if not api_key.strip():
+            raise ValueError("API key is required for OpenAI provider (received empty string)")
+        
+        # Ensure model_name is not None, use default if empty
+        if model_name is None or (isinstance(model_name, str) and not model_name.strip()):
+            model_name = "gpt-4o-mini"
+        elif not isinstance(model_name, str):
+            model_name = str(model_name)
+        
+        try:
+            self.client = openai.OpenAI(api_key=api_key)
+            self.model_name = model_name
+        except Exception as e:
+            raise ValueError(f"Failed to initialize OpenAI: {str(e)}. Check your API key.")
         self.secondary_kws = secondary_kws
         self.max_retries = max_retries
         self.request_delay = request_delay
-        self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
     
