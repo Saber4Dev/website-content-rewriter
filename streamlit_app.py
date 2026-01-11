@@ -21,7 +21,11 @@ from writer import (
     is_placeholder_image, get_real_image_url, get_smart_image_query,
     create_backup
 )
-from ai_providers import create_ai_provider, AIProvider
+from ai_providers import (
+    create_ai_provider, AIProvider,
+    GEMINI_SUPPORTED_MODELS, GEMINI_DEFAULT_MODEL,
+    GEMINI_MODEL_MIGRATION
+)
 
 # Page config
 st.set_page_config(
@@ -467,7 +471,7 @@ def process_file_web(file_path: Path, config: dict, file_index: int = 0, total_f
             secondary_kws=config.get('secondary_keywords') or [],
             max_retries=int(config.get('max_retries', 3)),
             request_delay=float(config.get('request_delay', 1.5)),
-            model_name=config.get('model_name', None),
+            model_name=config.get('model_name') or (GEMINI_DEFAULT_MODEL if ai_provider == 'gemini' else None),
             temperature=float(config.get('temperature', 0.1)),
             max_tokens=int(config.get('max_tokens', 8192 if ai_provider == 'gemini' else 4096))
         )
@@ -624,8 +628,36 @@ def main():
 
         api_key = st.session_state.api_key_input if st.session_state.api_key_valid else None
         
-        model_name_input = st.text_input("Model Name (optional)", placeholder="Auto", value="")
-        model_name = model_name_input.strip() if model_name_input else None
+        # Model selection with selectbox
+        if ai_provider == "gemini":
+            # Gemini models
+            gemini_model_options = {
+                "Gemini 1.5 Flash (Free)": "models/gemini-1.5-flash",
+                "Gemini 1.5 Pro (Paid)": "models/gemini-1.5-pro",
+            }
+            default_gemini = "Gemini 1.5 Flash (Free)"
+            selected_model_label = st.selectbox(
+                "Model",
+                options=list(gemini_model_options.keys()),
+                index=0 if default_gemini in gemini_model_options else 0,
+                help="Select a Gemini model. Flash is free, Pro is paid but more powerful."
+            )
+            model_name = gemini_model_options[selected_model_label]
+        else:
+            # OpenAI models
+            openai_model_options = {
+                "GPT-4o (Paid)": "gpt-4o",
+                "GPT-4o-mini (Paid)": "gpt-4o-mini",
+                "GPT-3.5 Turbo (Paid)": "gpt-3.5-turbo",
+            }
+            default_openai = "GPT-4o-mini (Paid)"
+            selected_model_label = st.selectbox(
+                "Model",
+                options=list(openai_model_options.keys()),
+                index=1 if default_openai in openai_model_options else 0,
+                help="Select an OpenAI model. All OpenAI models are paid."
+            )
+            model_name = openai_model_options[selected_model_label]
         temperature = st.slider("Temperature", 0.0, 2.0, 0.1, 0.1)
         max_tokens = st.number_input("Max Tokens", 512, 32768, 8192 if ai_provider == "gemini" else 4096, 512)
         max_retries = st.number_input("Max Retries", 1, 10, 3)
@@ -699,7 +731,7 @@ def main():
                     'api_key': api_key,
                     'gemini_api_key': api_key if ai_provider == 'gemini' else None,
                     'openai_api_key': api_key if ai_provider == 'openai' else None,
-                    'model_name': model_name if model_name else None,
+                    'model_name': model_name,  # Always set from selectbox
                     'temperature': temperature,
                     'max_tokens': max_tokens,
                     'max_retries': max_retries,
@@ -717,18 +749,37 @@ def main():
                     'create_backup': create_backup
                 }
                 
-                # Save uploaded files and process
-                for file_idx, uploaded_file in enumerate(uploaded_files):
-                    file_path = UPLOAD_FOLDER / uploaded_file.name
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                # Save uploaded files and process with real-time updates
+                with st.status("🔄 Processing files...", expanded=True) as status:
+                    # Show logs inside status block for real-time visibility
+                    log_container = st.container()
                     
-                    add_log(f"Processing: {uploaded_file.name}", 'info')
-                    process_file_web(file_path, config, file_idx, len(uploaded_files))
+                    for file_idx, uploaded_file in enumerate(uploaded_files):
+                        file_path = UPLOAD_FOLDER / uploaded_file.name
+                        with open(file_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        
+                        status.update(label=f"📄 Processing: {uploaded_file.name} ({file_idx + 1}/{len(uploaded_files)})", state="running")
+                        add_log(f"Processing: {uploaded_file.name}", 'info')
+                        
+                        # Display logs in real-time inside status
+                        with log_container:
+                            if st.session_state.logs:
+                                recent_logs = st.session_state.logs[-50:]  # Show last 50 in status
+                                for log in recent_logs[-10:]:  # Show last 10 in status block
+                                    level = log['level']
+                                    message = log['message']
+                                    timestamp = log['timestamp']
+                                    emoji = {'error': '❌', 'warning': '⚠️', 'success': '✅', 'info': 'ℹ️'}.get(level, 'ℹ️')
+                                    st.text(f"[{timestamp}] {emoji} {message}")
+                        
+                        process_file_web(file_path, config, file_idx, len(uploaded_files))
+                    
+                    st.session_state.progress = 100.0
+                    st.session_state.progress_text = "Processing complete!"
+                    st.session_state.processing = False
+                    status.update(label="✅ Processing complete!", state="complete")
                 
-                st.session_state.progress = 100.0
-                st.session_state.progress_text = "Processing complete!"
-                st.session_state.processing = False
                 st.success("✅ Processing complete!")
                 st.rerun()
         
@@ -747,45 +798,51 @@ def main():
         else:
             st.info("No files processed yet")
     
-    # Logs section with expandable container
-    with st.expander("📋 Processing Logs", expanded=True):
-        log_container = st.container()
-        with log_container:
-            if st.session_state.logs:
-                # Show last 100 logs in a scrollable container
-                recent_logs = st.session_state.logs[-100:]
-                
-                # Create a scrollable text area for logs
-                log_text = ""
-                for log in recent_logs:
-                    level = log['level']
-                    message = log['message']
-                    timestamp = log['timestamp']
-                    
-                    # Use emoji for different log levels
-                    emoji_map = {
-                        'error': '❌',
-                        'warning': '⚠️',
-                        'success': '✅',
-                        'info': 'ℹ️'
-                    }
-                    emoji = emoji_map.get(level, 'ℹ️')
-                    log_text += f"[{timestamp}] {emoji} {message}\n"
-                
-                # Display logs in a code block for better formatting
-                st.text_area(
-                    "Logs",
-                    value=log_text,
-                    height=300,
-                    disabled=True,
-                    label_visibility="collapsed",
-                    key="log_display"
-                )
-                
-                # Show log count
-                st.caption(f"Showing {len(recent_logs)} of {len(st.session_state.logs)} log entries")
+    # Logs section - always visible
+    st.subheader("📋 Processing Logs")
+    
+    if st.session_state.logs:
+        # Show last 150 logs for better visibility
+        recent_logs = st.session_state.logs[-150:]
+        
+        # Create a scrollable text area for logs
+        log_text = ""
+        for log in recent_logs:
+            level = log['level']
+            message = log['message']
+            timestamp = log['timestamp']
+            
+            # Use emoji for different log levels
+            emoji_map = {
+                'error': '❌',
+                'warning': '⚠️',
+                'success': '✅',
+                'info': 'ℹ️'
+            }
+            emoji = emoji_map.get(level, 'ℹ️')
+            log_text += f"[{timestamp}] {emoji} {message}\n"
+        
+        # Display logs in a text area with auto-scroll
+        st.text_area(
+            "Logs",
+            value=log_text,
+            height=400,
+            disabled=True,
+            label_visibility="collapsed",
+            key="log_display"
+        )
+        
+        # Show log count and status
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption(f"📊 Showing {len(recent_logs)} of {len(st.session_state.logs)} log entries")
+        with col2:
+            if st.session_state.processing:
+                st.caption("🔄 Processing...")
             else:
-                st.info("Ready to process files...")
+                st.caption("✅ Ready")
+    else:
+        st.info("Ready to process files...")
     
     # Image Gallery
     if st.session_state.image_assignments:

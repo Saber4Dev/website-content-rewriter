@@ -48,7 +48,7 @@ DEFAULT_AREA = "Nouvelle Ville Ibn Batouta"
 DEFAULT_BRAND = "Immobil.ma"
 DEFAULT_PHONE = "07 79 66 67 20"
 
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "models/gemini-1.5-flash"
 GENERATION_CONFIG = {
     "temperature": 0.1,
     "max_output_tokens": 8192,

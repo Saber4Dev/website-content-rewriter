@@ -17,6 +17,26 @@ except ImportError:
     GEMINI_AVAILABLE = False
     genai = None
 
+# ==========================================
+# GEMINI MODEL CONSTANTS
+# ==========================================
+# Supported Gemini models
+GEMINI_SUPPORTED_MODELS = {
+    "models/gemini-1.5-flash": "Gemini 1.5 Flash (Free)",
+    "models/gemini-1.5-pro": "Gemini 1.5 Pro (Paid)",
+}
+
+# Default Gemini model
+GEMINI_DEFAULT_MODEL = "models/gemini-1.5-flash"
+
+# Backward compatibility mapping for deprecated model names
+GEMINI_MODEL_MIGRATION = {
+    "gemini-pro": "models/gemini-1.5-flash",
+    "gemini-1.5-flash": "models/gemini-1.5-flash",
+    "gemini-1.5-pro": "models/gemini-1.5-pro",
+    "models/gemini-pro": "models/gemini-1.5-flash",
+}
+
 try:
     import openai
     OPENAI_AVAILABLE = True
@@ -65,7 +85,7 @@ class GeminiProvider(AIProvider):
         secondary_kws: Optional[List[str]],
         max_retries: int = 3,
         request_delay: float = 1.5,
-        model_name: str = "gemini-1.5-flash-latest",
+        model_name: str = GEMINI_DEFAULT_MODEL,
         temperature: float = 0.1,
         max_tokens: int = 8192,
         **kwargs
@@ -93,12 +113,37 @@ class GeminiProvider(AIProvider):
                 api_key = str(api_key)
             
             # Ensure model_name is not None, use default if empty
-            if not model_name or not isinstance(model_name, str):
-                model_name = "gemini-1.5-flash-latest"
-
+            if not model_name or not isinstance(model_name, str) or not model_name.strip():
+                model_name = GEMINI_DEFAULT_MODEL
+            
+            # Normalize model name (handle backward compatibility)
+            original_model_name = model_name.strip()
+            if original_model_name in GEMINI_MODEL_MIGRATION:
+                model_name = GEMINI_MODEL_MIGRATION[original_model_name]
+                logging.warning(f"⚠️ Deprecated model name '{original_model_name}' detected. Migrating to '{model_name}'")
+            
+            # Validate model name against supported models
+            if model_name not in GEMINI_SUPPORTED_MODELS:
+                supported_list = ", ".join(GEMINI_SUPPORTED_MODELS.keys())
+                raise ValueError(
+                    f"Unsupported Gemini model: '{model_name}'. "
+                    f"Supported models: {supported_list}. "
+                    f"Using deprecated or invalid model names will cause 404 errors."
+                )
+            
             # Initialize with google-generativeai
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(model_name)
+            
+            # Initialize the model with validation
+            try:
+                self.model = genai.GenerativeModel(model_name)
+                logging.info(f"✓ Initialized with model: {model_name} ({GEMINI_SUPPORTED_MODELS[model_name]})")
+            except Exception as e:
+                raise ValueError(
+                    f"Failed to initialize Gemini model '{model_name}'. "
+                    f"Error: {e}. "
+                    f"Please ensure the model name is correct and your API key has access to it."
+                )
             
             self.max_retries = max_retries
             self.request_delay = request_delay
