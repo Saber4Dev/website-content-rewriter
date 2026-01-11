@@ -52,6 +52,8 @@ if 'api_key_valid' not in st.session_state:
     st.session_state.api_key_valid = None
 if 'api_provider' not in st.session_state:
     st.session_state.api_provider = None
+if 'api_key_input' not in st.session_state:
+    st.session_state.api_key_input = ""
 
 # Create uploads directory
 UPLOAD_FOLDER = Path('uploads')
@@ -568,6 +570,12 @@ def check_api_key(api_key: str, provider: str) -> bool:
         return False
     return False
 
+def on_api_key_change():
+    """Callback function to validate API key."""
+    api_key = st.session_state.api_key_input
+    provider = st.session_state.api_provider
+    st.session_state.api_key_valid = check_api_key(api_key, provider)
+
 def main():
     st.title("✨ Website Content Rewriter")
     st.markdown("AI-Powered Content Optimization & Image Replacement")
@@ -597,26 +605,24 @@ def main():
         if st.session_state.api_provider != ai_provider:
             st.session_state.api_key_valid = None
             st.session_state.api_provider = ai_provider
+            st.session_state.api_key_input = "" # Clear previous key
 
-        api_key_input = st.text_input(f"{ai_provider.capitalize()} API Key", type="password", help=f"Get your key from {'Google AI Studio' if ai_provider == 'gemini' else 'OpenAI Platform'}")
-
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("Validate API Key"):
-                with st.spinner("Validating..."):
-                    is_valid = check_api_key(api_key_input, ai_provider)
-                    st.session_state.api_key_valid = is_valid
-                    if is_valid:
-                        st.success("Valid!")
-                    else:
-                        st.error("Invalid!")
-        with col2:
+        api_key_status = ""
+        if st.session_state.api_key_input: # Only show status if there is input
             if st.session_state.api_key_valid is True:
-                st.markdown("<p style='color: green; font-size: 24px;'>✅</p>", unsafe_allow_html=True)
+                api_key_status = "✅"
             elif st.session_state.api_key_valid is False:
-                st.markdown("<p style='color: red; font-size: 24px;'>❌</p>", unsafe_allow_html=True)
+                api_key_status = "❌"
 
-        api_key = api_key_input if st.session_state.api_key_valid else None
+        st.text_input(
+            f"{ai_provider.capitalize()} API Key {api_key_status}",
+            type="password",
+            help=f"Get your key from {'Google AI Studio' if ai_provider == 'gemini' else 'OpenAI Platform'}. Press Enter to validate.",
+            key="api_key_input",
+            on_change=on_api_key_change
+        )
+
+        api_key = st.session_state.api_key_input if st.session_state.api_key_valid else None
         
         model_name_input = st.text_input("Model Name (optional)", placeholder="Auto", value="")
         model_name = model_name_input.strip() if model_name_input else None
