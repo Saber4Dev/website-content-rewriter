@@ -48,6 +48,10 @@ if 'current_file' not in st.session_state:
     st.session_state.current_file = ""
 if 'total_files' not in st.session_state:
     st.session_state.total_files = 0
+if 'api_key_valid' not in st.session_state:
+    st.session_state.api_key_valid = None
+if 'api_provider' not in st.session_state:
+    st.session_state.api_provider = None
 
 # Create uploads directory
 UPLOAD_FOLDER = Path('uploads')
@@ -541,6 +545,29 @@ def process_file_web(file_path: Path, config: dict, file_index: int = 0, total_f
 # ==========================================
 # STREAMLIT UI
 # ==========================================
+
+def check_api_key(api_key: str, provider: str) -> bool:
+    """Check if the API key is valid for the given provider."""
+    if not api_key:
+        return False
+    try:
+        if provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            # Make a lightweight call to list models
+            models = [m for m in genai.list_models()]
+            return len(models) > 0
+        elif provider == "openai":
+            import openai
+            client = openai.OpenAI(api_key=api_key)
+            # Make a lightweight call to list models
+            client.models.list()
+            return True
+    except Exception as e:
+        add_log(f"API key validation failed: {str(e)}", 'error')
+        return False
+    return False
+
 def main():
     st.title("✨ Website Content Rewriter")
     st.markdown("AI-Powered Content Optimization & Image Replacement")
@@ -565,11 +592,31 @@ def main():
         # AI Provider Configuration
         st.subheader("🤖 AI Provider")
         ai_provider = st.selectbox("Select AI Provider", ["gemini", "openai"])
-        
-        if ai_provider == "gemini":
-            api_key = st.text_input("Gemini API Key", type="password", help="Get your key from [Google AI Studio](https://makersuite.google.com/app/apikey)")
-        else:
-            api_key = st.text_input("OpenAI API Key", type="password", help="Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)")
+
+        # Reset validation status if provider changes
+        if st.session_state.api_provider != ai_provider:
+            st.session_state.api_key_valid = None
+            st.session_state.api_provider = ai_provider
+
+        api_key_input = st.text_input(f"{ai_provider.capitalize()} API Key", type="password", help=f"Get your key from {'Google AI Studio' if ai_provider == 'gemini' else 'OpenAI Platform'}")
+
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("Validate API Key"):
+                with st.spinner("Validating..."):
+                    is_valid = check_api_key(api_key_input, ai_provider)
+                    st.session_state.api_key_valid = is_valid
+                    if is_valid:
+                        st.success("Valid!")
+                    else:
+                        st.error("Invalid!")
+        with col2:
+            if st.session_state.api_key_valid is True:
+                st.markdown("<p style='color: green; font-size: 24px;'>✅</p>", unsafe_allow_html=True)
+            elif st.session_state.api_key_valid is False:
+                st.markdown("<p style='color: red; font-size: 24px;'>❌</p>", unsafe_allow_html=True)
+
+        api_key = api_key_input if st.session_state.api_key_valid else None
         
         model_name_input = st.text_input("Model Name (optional)", placeholder="Auto", value="")
         model_name = model_name_input.strip() if model_name_input else None
