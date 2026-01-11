@@ -62,58 +62,59 @@ class GeminiProvider(AIProvider):
         area: str,
         phone: str,
         primary_kw: str,
-        secondary_kws: List[str],
+        secondary_kws: Optional[List[str]],
         max_retries: int = 3,
         request_delay: float = 1.5,
-        model_name: str = "gemini-2.0-flash",
+        model_name: str = "gemini-1.5-flash-latest",
         temperature: float = 0.1,
-        max_tokens: int = 8192
+        max_tokens: int = 8192,
+        **kwargs
     ):
-        if not GEMINI_AVAILABLE or genai is None:
-            raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai")
-        
-        # Ensure secondary_kws is always a list
-        if secondary_kws is None:
-            secondary_kws = []
-        elif not isinstance(secondary_kws, list):
-            secondary_kws = [str(secondary_kws)] if secondary_kws else []
-        
-        # Ensure other string parameters are not None
-        self.brand = brand or ""
-        self.city = city or ""
-        self.area = area or ""
-        self.phone = phone or ""
-        self.primary_kw = primary_kw or ""
-        
-        # Ensure api_key is not None or empty
-        if api_key is None:
-            raise ValueError("API key is required for Gemini provider (received None)")
-        if not isinstance(api_key, str):
-            api_key = str(api_key)
-        if not api_key.strip():
-            raise ValueError("API key is required for Gemini provider (received empty string)")
-        
-        # Ensure model_name is not None, use default if empty
-        if model_name is None or (isinstance(model_name, str) and not model_name.strip()):
-            model_name = "gemini-2.0-flash"
-        elif not isinstance(model_name, str):
-            model_name = str(model_name)
-        
-        # Initialize with google-generativeai (reliable and still supported)
         try:
+            if not GEMINI_AVAILABLE or genai is None:
+                raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai")
+
+            # Defensive handling of secondary_kws
+            self.secondary_kws = secondary_kws if secondary_kws is not None else []
+            if not isinstance(self.secondary_kws, list):
+                self.secondary_kws = [str(k) for k in self.secondary_kws] if self.secondary_kws else []
+
+            # Ensure other string parameters are not None
+            self.brand = brand or ""
+            self.city = city or ""
+            self.area = area or ""
+            self.phone = phone or ""
+            self.primary_kw = primary_kw or ""
+            
+            # Ensure api_key is not None or empty
+            if not api_key:
+                raise ValueError("API key is required for Gemini provider (received None or empty)")
+            if not isinstance(api_key, str):
+                api_key = str(api_key)
+            
+            # Ensure model_name is not None, use default if empty
+            if not model_name or not isinstance(model_name, str):
+                model_name = "gemini-1.5-flash-latest"
+
+            # Initialize with google-generativeai
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel(model_name)
+            
+            self.max_retries = max_retries
+            self.request_delay = request_delay
+            self.generation_config = {
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+                "response_mime_type": "text/plain",
+            }
+            self.custom_text_prompt = None
+            logging.info(f"GeminiProvider initialized successfully with model {model_name}")
+
         except Exception as e:
-            raise ValueError(f"Failed to initialize Gemini: {str(e)}. Check your API key and model name.")
-        self.secondary_kws = secondary_kws
-        self.max_retries = max_retries
-        self.request_delay = request_delay
-        self.generation_config = {
-            "temperature": temperature,
-            "max_output_tokens": max_tokens,
-            "response_mime_type": "text/plain",
-        }
-        self.custom_text_prompt = None
+            import traceback
+            logging.error(f"❌ ❌ Failed to initialize GeminiProvider: {e}")
+            traceback.print_exc()
+            raise ValueError(f"Failed to initialize Gemini: {str(e)}. Check your configuration and traceback.")
     
     def _call_gemini(self, prompt: str) -> str:
         """Call Gemini API with retries."""
