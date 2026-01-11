@@ -20,8 +20,25 @@ A powerful web application for automatically rewriting HTML content using AI and
 
 - Python 3.8 or higher
 - API key from either:
-  - [Google Gemini](https://makersuite.google.com/app/apikey) (free)
+  - [Google Gemini](https://aistudio.google.com/app/apikey) (free tier available)
   - [OpenAI](https://platform.openai.com/api-keys) (paid)
+
+### Supported AI Models
+
+**Gemini Models:**
+- `models/gemini-2.5-flash` (Default - Fast & Free)
+- `models/gemini-2.5-pro` (More powerful, paid)
+- `models/gemini-pro-latest` (Latest Pro version)
+- `models/gemini-flash-latest` (Latest Flash version)
+- `models/gemini-2.0-flash` (Stable version)
+- `models/gemini-2.0-flash-lite` (Lightweight version)
+- `models/gemini-3-pro-preview` (Preview)
+- `models/gemini-3-flash-preview` (Preview)
+
+**OpenAI Models:**
+- `gpt-4o` (Latest GPT-4)
+- `gpt-4o-mini` (Faster, cheaper)
+- `gpt-3.5-turbo` (Legacy)
 
 ## 🛠️ Installation
 
@@ -30,14 +47,23 @@ A powerful web application for automatically rewriting HTML content using AI and
 cd website-content-rewriter
 ```
 
-2. **Install dependencies:**
+2. **Create a virtual environment (recommended):**
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+```
+
+3. **Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. **Run the application:**
+4. **Run the application:**
 ```bash
-streamlit run streamlit_app.py
+streamlit run app.py
 ```
 
 Or use the provided scripts:
@@ -97,29 +123,34 @@ The app can also be deployed on:
 - ✅ Multiple image source support
 
 ### Real-time Logging
-- ✅ See processing progress in real-time
-- ✅ View all logs with timestamps
-- ✅ Error and warning messages
+- ✅ **Live log updates** - See logs appear in real-time during processing
+- ✅ View all logs with timestamps and emoji indicators
+- ✅ Error and warning messages highlighted
+- ✅ Automatic log display updates without page refresh
+- ✅ Last 200 logs displayed for optimal performance
+
+### Rate Limiting & Error Handling
+- ✅ Automatic handling of 429 (Rate Limit) errors
+- ✅ Respects API retryDelay values from error responses
+- ✅ Exponential backoff for retries
+- ✅ Graceful error handling with clear messages
 
 ## 📁 Project Structure
 
 ```
 website-content-rewriter/
-├── streamlit_app.py          # Main Streamlit application
-├── requirements.txt          # Python dependencies
-├── README.md                # This file
-├── .gitignore               # Git ignore rules
-├── run_streamlit.bat        # Windows startup script
-├── run_streamlit.sh         # Linux/Mac startup script
-├── PROJECT_STRUCTURE.md      # Detailed structure documentation
-├── GITHUB_SETUP.md          # GitHub setup guide
-├── src/                     # Source code
-│   ├── __init__.py
-│   ├── ai_providers.py      # AI provider abstraction (Gemini, OpenAI)
-│   └── writer.py            # Core HTML processing logic
-└── examples/                # Example HTML files
-    ├── README.md
-    └── sample.html          # Sample HTML file for testing
+├── app.py                   # Main Streamlit application
+├── requirements.txt         # Python dependencies
+├── README.md               # This file
+├── .gitignore              # Git ignore rules
+├── run_streamlit.bat       # Windows startup script
+├── run_streamlit.sh        # Linux/Mac startup script
+├── src/                    # Source code
+│   ├── ai_providers.py     # AI provider abstraction (Gemini, OpenAI)
+│   └── writer.py           # Core HTML processing logic
+├── examples/               # Example HTML files
+│   └── sample.html         # Sample HTML file for testing
+└── uploads/                # Uploaded files (auto-created)
 ```
 
 ## 🔧 Configuration
@@ -142,17 +173,62 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ## 🐛 Troubleshooting
 
-- **API Key Error**: Make sure your API key is correct and has sufficient credits
-- **Import Errors**: Ensure all dependencies are installed: `pip install -r requirements.txt`
-- **Image Not Loading**: Some image sources may be rate-limited, try different sources
-- **Processing Slow**: Increase request delay or reduce number of files processed at once
+### Common Issues
+
+**API Key Error:**
+- Make sure your API key is correct and has sufficient credits
+- For Gemini: Get your key from [Google AI Studio](https://aistudio.google.com/app/apikey)
+- For OpenAI: Get your key from [OpenAI Platform](https://platform.openai.com/api-keys)
+
+**Model Not Found (404 Error):**
+- The app automatically uses supported models
+- If you see 404 errors, the selected model may not be available for your API key
+- Try selecting a different model from the dropdown
+
+**Rate Limiting (429 Error):**
+- The app automatically handles rate limits by respecting API retryDelay values
+- If you hit rate limits frequently, increase the "Request Delay" setting
+- Consider using Gemini Flash (free tier) for testing
+
+**Import Errors:**
+- Ensure all dependencies are installed: `pip install -r requirements.txt`
+- Make sure you're using Python 3.8 or higher
+- If using `google-genai`, ensure version >= 0.2.0
+
+**Image Not Loading:**
+- Some image sources may be rate-limited, try different sources
+- Check your internet connection
+- Some sources may require API keys (not currently implemented)
+
+**Processing Slow:**
+- Increase request delay in settings
+- Reduce number of files processed at once
+- Use faster models (e.g., Gemini Flash instead of Pro)
+- Check your API quota limits
+
+**Logs Not Updating:**
+- Logs update in real-time during processing
+- If logs don't appear, check browser console for errors
+- Ensure Streamlit version >= 1.28.0
 
 ## 📝 Notes
 
-- Processed files are saved in the `uploads/` folder (auto-created)
-- Backups are created automatically (if enabled)
-- The app processes files sequentially for better control
-- All image URLs are external (no local storage needed)
+- **File Storage**: Processed files are saved in the `uploads/` folder (auto-created)
+- **Backups**: Backups are created automatically (if enabled) with timestamp
+- **Processing**: Files are processed sequentially for better control and error handling
+- **Images**: All image URLs are external (no local storage needed)
+- **Logs**: Logs are stored in session state and update in real-time
+- **API Usage**: The app respects rate limits and uses exponential backoff for retries
+- **Model Selection**: Use the dropdown to select from supported models (prevents 404 errors)
+
+## 🔄 Recent Updates
+
+- ✅ **New Gemini SDK**: Updated to use `google-genai` (official new SDK)
+- ✅ **Latest Models**: Support for Gemini 2.5 and 3.0 models
+- ✅ **Live Logging**: Real-time log updates during processing
+- ✅ **Rate Limit Handling**: Automatic 429 error handling with retryDelay support
+- ✅ **Model Validation**: Prevents invalid model selection
+- ✅ **Improved Error Messages**: Clear, actionable error messages
 
 ## 🤝 Contributing
 
@@ -165,8 +241,15 @@ This project is open source and available for personal and commercial use.
 ## 🙏 Acknowledgments
 
 - [Streamlit](https://streamlit.io/) for the amazing framework
-- [Google Gemini](https://ai.google.dev/) and [OpenAI](https://openai.com/) for AI capabilities
-- Image sources: Unsplash, Pexels, Pixabay, Openverse, Flickr
+- [Google Gemini](https://ai.google.dev/) for AI capabilities (using official `google-genai` SDK)
+- [OpenAI](https://openai.com/) for AI capabilities
+- Image sources: Unsplash, Pexels, Pixabay, Openverse, Flickr, Picsum
+
+## 🔗 Links
+
+- **Gemini API**: [Google AI Studio](https://aistudio.google.com/)
+- **OpenAI API**: [OpenAI Platform](https://platform.openai.com/)
+- **Streamlit**: [Streamlit Documentation](https://docs.streamlit.io/)
 
 ## 📧 Support
 

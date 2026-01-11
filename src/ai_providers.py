@@ -9,9 +9,9 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional
 import json
 
-# Use google-generativeai (still supported until June 2026)
+# Use official google.genai SDK (new SDK)
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -20,21 +20,33 @@ except ImportError:
 # ==========================================
 # GEMINI MODEL CONSTANTS
 # ==========================================
-# Supported Gemini models
+# Supported Gemini models (with "models/" prefix as required by API)
 GEMINI_SUPPORTED_MODELS = {
-    "models/gemini-1.5-flash": "Gemini 1.5 Flash (Free)",
-    "models/gemini-1.5-pro": "Gemini 1.5 Pro (Paid)",
+    "models/gemini-2.5-flash": "Gemini 2.5 Flash (Default - Fast & Stable)",
+    "models/gemini-2.5-pro": "Gemini 2.5 Pro",
+    "models/gemini-pro-latest": "Gemini Pro Latest",
+    "models/gemini-flash-latest": "Gemini Flash Latest",
+    "models/gemini-2.0-flash": "Gemini 2.0 Flash",
+    "models/gemini-2.0-flash-lite": "Gemini 2.0 Flash Lite",
+    "models/gemini-3-pro-preview": "Gemini 3 Pro (Preview)",
+    "models/gemini-3-flash-preview": "Gemini 3 Flash (Preview)",
 }
 
 # Default Gemini model
-GEMINI_DEFAULT_MODEL = "models/gemini-1.5-flash"
+GEMINI_DEFAULT_MODEL = "models/gemini-2.5-flash"
 
 # Backward compatibility mapping for deprecated model names
 GEMINI_MODEL_MIGRATION = {
-    "gemini-pro": "models/gemini-1.5-flash",
-    "gemini-1.5-flash": "models/gemini-1.5-flash",
-    "gemini-1.5-pro": "models/gemini-1.5-pro",
-    "models/gemini-pro": "models/gemini-1.5-flash",
+    # Old format without "models/" prefix
+    "gemini-1.5-flash": "models/gemini-2.5-flash",
+    "gemini-1.5-pro": "models/gemini-2.5-pro",
+    "gemini-pro": "models/gemini-2.5-flash",
+    "gemini-2.5-flash": "models/gemini-2.5-flash",
+    "gemini-2.5-pro": "models/gemini-2.5-pro",
+    # Old format with "models/" prefix but deprecated models
+    "models/gemini-1.5-flash": "models/gemini-2.5-flash",
+    "models/gemini-1.5-pro": "models/gemini-2.5-pro",
+    "models/gemini-pro": "models/gemini-2.5-flash",
 }
 
 try:
@@ -92,7 +104,7 @@ class GeminiProvider(AIProvider):
     ):
         try:
             if not GEMINI_AVAILABLE or genai is None:
-                raise ImportError("google-generativeai package not installed. Install with: pip install google-generativeai")
+                raise ImportError("google-genai package not installed. Install with: pip install google-genai")
 
             # Defensive handling of secondary_kws
             self.secondary_kws = secondary_kws if secondary_kws is not None else []
@@ -122,28 +134,9 @@ class GeminiProvider(AIProvider):
                 model_name = GEMINI_MODEL_MIGRATION[original_model_name]
                 logging.warning(f"⚠️ Deprecated model name '{original_model_name}' detected. Migrating to '{model_name}'")
             
-            # Validate model name against supported models
-            if model_name not in GEMINI_SUPPORTED_MODELS:
-                supported_list = ", ".join(GEMINI_SUPPORTED_MODELS.keys())
-                raise ValueError(
-                    f"Unsupported Gemini model: '{model_name}'. "
-                    f"Supported models: {supported_list}. "
-                    f"Using deprecated or invalid model names will cause 404 errors."
-                )
-            
-            # Initialize with google-generativeai
-            genai.configure(api_key=api_key)
-            
-            # Initialize the model with validation
-            try:
-                self.model = genai.GenerativeModel(model_name)
-                logging.info(f"✓ Initialized with model: {model_name} ({GEMINI_SUPPORTED_MODELS[model_name]})")
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to initialize Gemini model '{model_name}'. "
-                    f"Error: {e}. "
-                    f"Please ensure the model name is correct and your API key has access to it."
-                )
+            # Initialize client - no model initialization needed in new SDK
+            self.client = genai.Client(api_key=api_key)
+            self.model_name = model_name.strip()
             
             self.max_retries = max_retries
             self.request_delay = request_delay
@@ -153,7 +146,7 @@ class GeminiProvider(AIProvider):
                 "response_mime_type": "text/plain",
             }
             self.custom_text_prompt = None
-            logging.info(f"GeminiProvider initialized successfully with model {model_name}")
+            logging.info(f"✓ GeminiProvider initialized with model: {self.model_name}")
 
         except Exception as e:
             import traceback
@@ -162,11 +155,21 @@ class GeminiProvider(AIProvider):
             raise ValueError(f"Failed to initialize Gemini: {str(e)}. Check your configuration and traceback.")
     
     def _call_gemini(self, prompt: str) -> str:
-        """Call Gemini API with retries."""
+        """Call Gemini API with retries using new google.genai SDK.
+        Handles 429 RESOURCE_EXHAUSTED errors by respecting retryDelay from API.
+        """
         for attempt in range(1, self.max_retries + 1):
             try:
-                resp = self.model.generate_content(prompt, generation_config=self.generation_config)
-                text = (resp.text or "").strip()
+                # Use new SDK: call model directly via client.models.generate_content
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": self.generation_config.get("temperature", 0.1),
+                        "max_output_tokens": self.generation_config.get("max_output_tokens", 8192),
+                    }
+                )
+                text = (response.text or "").strip()
                 if text:
                     logging.debug(f"Gemini response received (length: {len(text)})")
                     return text
@@ -174,9 +177,57 @@ class GeminiProvider(AIProvider):
                     logging.warning(f"Gemini returned empty response (attempt {attempt}/{self.max_retries})")
             except Exception as e:
                 error_msg = str(e)
+                error_code = None
+                retry_delay = None
+                
+                # Check for 429 RESOURCE_EXHAUSTED error
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg.upper():
+                    error_code = 429
+                    # Try to extract retryDelay from error
+                    try:
+                        # Check if error has retry_info attribute
+                        if hasattr(e, 'retry_info') and e.retry_info:
+                            retry_delay = getattr(e.retry_info, 'retry_delay', None)
+                        # Check if error has details with retryDelay
+                        elif hasattr(e, 'details') and e.details:
+                            for detail in e.details:
+                                if hasattr(detail, 'retry_delay'):
+                                    retry_delay = detail.retry_delay
+                                elif hasattr(detail, 'retryDelay'):
+                                    retry_delay = detail.retryDelay
+                        # Try parsing from error message
+                        if retry_delay is None:
+                            import re
+                            # Look for retryDelay in seconds in error message
+                            match = re.search(r'retry[_\s]?delay[:\s]+(\d+(?:\.\d+)?)', error_msg, re.IGNORECASE)
+                            if match:
+                                retry_delay = float(match.group(1))
+                    except Exception:
+                        pass
+                
                 logging.warning(f"Gemini error (attempt {attempt}/{self.max_retries}): {error_msg}")
+                
                 if attempt < self.max_retries:
-                    time.sleep(2)
+                    # For 429 errors, use API's retryDelay if available, otherwise use exponential backoff
+                    if error_code == 429 and retry_delay is not None:
+                        wait_time = float(retry_delay)
+                        logging.info(f"⏳ Rate limited (429). Waiting {wait_time:.2f} seconds as specified by API before retry...")
+                        time.sleep(wait_time)
+                    else:
+                        # For other errors or if retryDelay not available, use configured delay with exponential backoff
+                        wait_time = self.request_delay * (2 ** (attempt - 1))
+                        logging.debug(f"Waiting {wait_time:.2f} seconds before retry...")
+                        time.sleep(wait_time)
+                else:
+                    # Last attempt failed
+                    if error_code == 429:
+                        raise RuntimeError(
+                            f"Gemini call failed after {self.max_retries} retries due to rate limiting (429). "
+                            f"Please wait before making more requests."
+                        )
+                    else:
+                        raise RuntimeError(f"Gemini call failed after {self.max_retries} retries")
+        
         raise RuntimeError(f"Gemini call failed after {self.max_retries} retries")
     
     def _get_language_name(self, language: str) -> str:

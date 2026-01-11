@@ -12,9 +12,9 @@ from typing import List, Tuple, Optional
 from datetime import datetime
 
 from bs4 import BeautifulSoup, NavigableString, Comment
-# Use old package (google-generativeai) - most reliable
+# Use new official google.genai SDK
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -48,7 +48,7 @@ DEFAULT_AREA = "Nouvelle Ville Ibn Batouta"
 DEFAULT_BRAND = "Immobil.ma"
 DEFAULT_PHONE = "07 79 66 67 20"
 
-MODEL_NAME = "models/gemini-1.5-flash"
+MODEL_NAME = "models/gemini-2.5-flash"
 GENERATION_CONFIG = {
     "temperature": 0.1,
     "max_output_tokens": 8192,
@@ -121,9 +121,9 @@ class GeminiSEORewriter:
         if not GEMINI_AVAILABLE or genai is None:
             raise ImportError("google-genai package not installed. Install with: pip install google-genai")
         
-        # The new google-genai package still supports the old API structure
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(MODEL_NAME)
+        # Use new google.genai SDK - no model initialization needed
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = MODEL_NAME
         self.brand = brand
         self.city = city
         self.area = area
@@ -134,16 +134,76 @@ class GeminiSEORewriter:
         self.request_delay = request_delay
 
     def _call_gemini(self, prompt: str) -> str:
+        """Call Gemini API with retries using new google.genai SDK.
+        Handles 429 RESOURCE_EXHAUSTED errors by respecting retryDelay from API.
+        """
         for attempt in range(1, self.max_retries + 1):
             try:
-                # Works with both old and new google-genai package
-                resp = self.model.generate_content(prompt, generation_config=GENERATION_CONFIG)
-                text = (resp.text or "").strip()
+                # Use new SDK: call model directly via client.models.generate_content
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": GENERATION_CONFIG.get("temperature", 0.1),
+                        "max_output_tokens": GENERATION_CONFIG.get("max_output_tokens", 8192),
+                    }
+                )
+                text = (response.text or "").strip()
                 if text:
                     return text
             except Exception as e:
-                logging.warning(f"Gemini error (attempt {attempt}/{self.max_retries}): {e}")
-                time.sleep(2)
+                error_msg = str(e)
+                error_code = None
+                retry_delay = None
+                
+                # Check for 429 RESOURCE_EXHAUSTED error
+                if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg.upper():
+                    error_code = 429
+                    # Try to extract retryDelay from error
+                    try:
+                        # Check if error has retry_info attribute
+                        if hasattr(e, 'retry_info') and e.retry_info:
+                            retry_delay = getattr(e.retry_info, 'retry_delay', None)
+                        # Check if error has details with retryDelay
+                        elif hasattr(e, 'details') and e.details:
+                            for detail in e.details:
+                                if hasattr(detail, 'retry_delay'):
+                                    retry_delay = detail.retry_delay
+                                elif hasattr(detail, 'retryDelay'):
+                                    retry_delay = detail.retryDelay
+                        # Try parsing from error message
+                        if retry_delay is None:
+                            import re
+                            # Look for retryDelay in seconds in error message
+                            match = re.search(r'retry[_\s]?delay[:\s]+(\d+(?:\.\d+)?)', error_msg, re.IGNORECASE)
+                            if match:
+                                retry_delay = float(match.group(1))
+                    except Exception:
+                        pass
+                
+                logging.warning(f"Gemini error (attempt {attempt}/{self.max_retries}): {error_msg}")
+                
+                if attempt < self.max_retries:
+                    # For 429 errors, use API's retryDelay if available, otherwise use exponential backoff
+                    if error_code == 429 and retry_delay is not None:
+                        wait_time = float(retry_delay)
+                        logging.info(f"⏳ Rate limited (429). Waiting {wait_time:.2f} seconds as specified by API before retry...")
+                        time.sleep(wait_time)
+                    else:
+                        # For other errors or if retryDelay not available, use configured delay with exponential backoff
+                        wait_time = self.request_delay * (2 ** (attempt - 1))
+                        logging.debug(f"Waiting {wait_time:.2f} seconds before retry...")
+                        time.sleep(wait_time)
+                else:
+                    # Last attempt failed
+                    if error_code == 429:
+                        raise RuntimeError(
+                            f"Gemini call failed after {self.max_retries} retries due to rate limiting (429). "
+                            f"Please wait before making more requests."
+                        )
+                    else:
+                        raise RuntimeError("Gemini call failed after retries")
+        
         raise RuntimeError("Gemini call failed after retries")
 
     def rewrite_texts_batch(self, id_text_pairs: List[Tuple[int, str]], section_context: str = "", node_types: List[str] = None) -> List[Tuple[int, str]]:
